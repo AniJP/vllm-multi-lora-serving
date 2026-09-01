@@ -7,6 +7,7 @@ Run once per task:
 """
 
 import argparse
+import inspect
 import json
 from pathlib import Path
 
@@ -17,6 +18,18 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from trl import SFTConfig, SFTTrainer
 
 TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+
+# TRL has renamed SFTConfig fields across releases (e.g. max_seq_length ->
+# max_length). Resolve against whichever name the installed version accepts
+# instead of hardcoding one, so a version bump doesn't break this again.
+SFT_CONFIG_PARAMS = set(inspect.signature(SFTConfig.__init__).parameters)
+
+
+def _resolve_kwarg(candidates, value):
+    for name in candidates:
+        if name in SFT_CONFIG_PARAMS:
+            return {name: value}
+    raise TypeError(f"None of {candidates} are accepted by the installed trl.SFTConfig")
 
 
 def load_jsonl(path):
@@ -72,19 +85,20 @@ def main():
     )
 
     output_dir = Path(args.output_dir) / f"{args.task}-lora"
-    sft_config = SFTConfig(
+    sft_kwargs = dict(
         output_dir=str(output_dir),
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
         gradient_accumulation_steps=args.grad_accum,
         learning_rate=args.lr,
-        max_seq_length=args.max_seq_len,
-        dataset_text_field="text",
         bf16=True,
         logging_steps=20,
         save_strategy="no",
         report_to="none",
     )
+    sft_kwargs.update(_resolve_kwarg(["max_length", "max_seq_length"], args.max_seq_len))
+    sft_kwargs.update(_resolve_kwarg(["dataset_text_field"], "text"))
+    sft_config = SFTConfig(**sft_kwargs)
 
     trainer = SFTTrainer(
         model=model,
