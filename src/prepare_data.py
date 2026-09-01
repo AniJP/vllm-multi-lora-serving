@@ -38,25 +38,52 @@ def build_summarize(n_train: int, n_test: int):
     return examples[:n_train], examples[n_train:]
 
 
-# conll2003 ner_tags scheme: 0=O, 1/2=B/I-PER, 3/4=B/I-ORG, 5/6=B/I-LOC, 7/8=B/I-MISC
-CONLL_LABELS = {1: "PERSON", 2: "PERSON", 3: "ORG", 4: "ORG", 5: "LOC", 6: "LOC", 7: "MISC", 8: "MISC"}
-CONLL_BEGIN_TAGS = {1, 3, 5, 7}
+# eriktks/conll2003 ships a legacy Python loading script, which recent
+# `datasets` versions refuse to run. Try Parquet-backed sources instead, in
+# order, and read the BIO label names off the dataset's own feature schema
+# rather than hardcoding tag ids (which differ between repackagings).
+NER_CANDIDATES = [
+    {"path": "eriktks/conll2003", "kwargs": {"revision": "refs/convert/parquet"}, "tag_col": "ner_tags"},
+    {"path": "tner/conll2003", "kwargs": {}, "tag_col": "tags"},
+]
+
+# Some repackagings abbreviate PER; keep output wording consistent with
+# SYSTEM_PROMPTS["extract"] either way.
+LABEL_DISPLAY = {"PER": "PERSON"}
 
 
-def _bio_to_entities(tokens, tags):
+def _load_ner_dataset():
+    last_err = None
+    for cand in NER_CANDIDATES:
+        try:
+            ds = load_dataset(cand["path"], split="train", **cand["kwargs"])
+            return ds, cand["tag_col"]
+        except Exception as e:  # noqa: BLE001 - trying multiple sources on purpose
+            last_err = e
+    raise RuntimeError(
+        "Could not load a CoNLL-2003-style NER dataset from any known source "
+        f"({[c['path'] for c in NER_CANDIDATES]}). Hugging Face deprecated "
+        "script-based dataset loading, so a mirror may have moved again - "
+        "pick a current Parquet-backed NER dataset and update NER_CANDIDATES."
+    ) from last_err
+
+
+def _bio_to_entities(tokens, tag_ids, id2label):
     entities = []
     current, current_type = [], None
-    for tok, tag in zip(tokens, tags):
-        label = CONLL_LABELS.get(tag)
-        if label is None:  # O
+    for tok, tag_id in zip(tokens, tag_ids):
+        label = id2label[tag_id]
+        if label == "O":
             if current:
                 entities.append({"text": " ".join(current), "type": current_type})
                 current, current_type = [], None
             continue
-        if tag in CONLL_BEGIN_TAGS or label != current_type:
+        prefix, ent_type = label.split("-", 1)
+        ent_type = LABEL_DISPLAY.get(ent_type, ent_type)
+        if prefix == "B" or ent_type != current_type:
             if current:
                 entities.append({"text": " ".join(current), "type": current_type})
-            current, current_type = [tok], label
+            current, current_type = [tok], ent_type
         else:
             current.append(tok)
     if current:
@@ -65,12 +92,13 @@ def _bio_to_entities(tokens, tags):
 
 
 def build_extract(n_train: int, n_test: int):
-    ds = load_dataset("eriktks/conll2003", split="train", trust_remote_code=True)
+    ds, tag_col = _load_ner_dataset()
+    id2label = ds.features[tag_col].feature.names
     ds = ds.shuffle(seed=0).select(range(n_train + n_test))
     examples = []
     for row in ds:
         text = " ".join(row["tokens"])
-        entities = _bio_to_entities(row["tokens"], row["ner_tags"])
+        entities = _bio_to_entities(row["tokens"], row[tag_col], id2label)
         user = f"### Text:\n{text}"
         examples.append({"user": user, "assistant": json.dumps(entities)})
     return examples[:n_train], examples[n_train:]
