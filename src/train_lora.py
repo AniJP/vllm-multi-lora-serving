@@ -98,6 +98,13 @@ def main():
     )
     sft_kwargs.update(_resolve_kwarg(["max_length", "max_seq_length"], args.max_seq_len))
     sft_kwargs.update(_resolve_kwarg(["dataset_text_field"], "text"))
+    if "loss_type" in SFT_CONFIG_PARAMS:
+        # Newer trl defaults to loss_type="chunked_nll", which patches the
+        # model's forward to save memory but assumes `forward` is a bound
+        # method. With device_map="auto" + PEFT + 4-bit quantization it ends
+        # up wrapped as a functools.partial instead, crashing the patch.
+        # Plain "nll" skips that patch entirely.
+        sft_kwargs["loss_type"] = "nll"
     sft_config = SFTConfig(**sft_kwargs)
 
     trainer = SFTTrainer(
