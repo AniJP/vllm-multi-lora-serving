@@ -94,8 +94,11 @@ curl http://localhost:8000/v1/chat/completions \
 See `notebooks/kaggle_train_and_serve.ipynb`. It clones this repo (push it to
 GitHub first), installs dependencies, runs data prep + training for all 3
 tasks, then installs vLLM and runs the comparison demo — all within one
-session. Training each adapter on ~2,000 examples for 2 epochs on a T4 takes
-roughly 20-40 minutes per task depending on sequence length.
+session. The notebook's defaults (`--n-train 800 --epochs 1.5`) take roughly
+25-30 minutes per task on a T4; scaling up to 2,000 examples / 2 epochs (better
+adapter quality) takes closer to 90 minutes per task, since forcing
+`loss_type="nll"` (see Troubleshooting) trades some training speed for
+avoiding a `trl` crash on this stack.
 
 ## Notes
 
@@ -108,3 +111,27 @@ roughly 20-40 minutes per task depending on sequence length.
 - This project is deliberately **not** a benchmarking exercise — no
   throughput/latency numbers are collected. The deliverable is the working
   multi-adapter serving demo and the trained adapters themselves.
+
+## Troubleshooting
+
+Issues hit and fixed while running this on Kaggle, in case you hit them too:
+
+- **`RuntimeError: Dataset scripts are no longer supported`** — `eriktks/conll2003`
+  ships a legacy loading script that current `datasets` refuses to run.
+  `prepare_data.py` already works around this (Parquet mirror + fallback), so
+  pull latest if you see this.
+- **`torch.AcceleratorError: no kernel image is available for execution`** —
+  Kaggle assigned a **P100** GPU (compute capability 6.0, no Tensor Cores),
+  which recent PyTorch/vLLM wheels don't ship kernels for. Fix: Notebook
+  Settings → Accelerator → **GPU T4 x2**, not P100.
+- **`TypeError: SFTConfig.__init__() got an unexpected keyword argument`** —
+  `trl` has renamed `SFTConfig` fields across releases (e.g.
+  `max_seq_length` → `max_length`). `train_lora.py` resolves field names
+  against the installed `trl` version's actual signature instead of
+  hardcoding one.
+- **`AttributeError: 'functools.partial' object has no attribute '__func__'`**
+  during `SFTTrainer(...)` construction — `trl`'s default
+  `loss_type="chunked_nll"` patches the model's forward assuming it's a bound
+  method; with `device_map="auto"` + PEFT + 4-bit quantization it's a
+  `functools.partial` instead, and the patch crashes. `train_lora.py` forces
+  `loss_type="nll"` to skip that codepath (slightly slower training, no crash).
