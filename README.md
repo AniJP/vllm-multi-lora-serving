@@ -82,6 +82,7 @@ hot-loaded and hit it with curl / any OpenAI client:
 ```bash
 vllm serve meta-llama/Llama-3.2-3B-Instruct \
   --enable-lora \
+  --max-model-len 4096 \
   --lora-modules sql-adapter=adapters/sql-lora summarize-adapter=adapters/summarize-lora extract-adapter=adapters/extract-lora
 
 curl http://localhost:8000/v1/chat/completions \
@@ -135,3 +136,10 @@ Issues hit and fixed while running this on Kaggle, in case you hit them too:
   method; with `device_map="auto"` + PEFT + 4-bit quantization it's a
   `functools.partial` instead, and the patch crashes. `train_lora.py` forces
   `loss_type="nll"` to skip that codepath (slightly slower training, no crash).
+- **`ValueError: ... 14.0 GiB KV cache is needed, which is larger than the
+  available KV cache memory (5.41 GiB)`** during `LLM(...)` init — Llama-3.2's
+  default 131072-token context makes vLLM try to reserve ~14GiB of KV cache
+  before it even sees a request, which doesn't fit a 16GB GPU alongside the
+  model weights. `serve_demo.py` now passes `--max-model-len 4096` (plenty for
+  our short prompts + 256-token generations); pass a different value for
+  longer contexts if you need them.

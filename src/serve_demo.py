@@ -44,11 +44,27 @@ def main():
     ap.add_argument("--base-model", default="meta-llama/Llama-3.2-3B-Instruct")
     ap.add_argument("--adapters-dir", default="adapters")
     ap.add_argument("--mode", choices=["compare", "interactive"], default="compare")
+    ap.add_argument(
+        "--max-model-len",
+        type=int,
+        default=4096,
+        help=(
+            "Llama-3.2's default 131072 context needs ~14GiB of KV cache just to "
+            "start, which doesn't fit a 16GB GPU alongside the model weights. Our "
+            "prompts + 256-token generations don't need anywhere near that."
+        ),
+    )
     args = ap.parse_args()
 
     adapter_paths = {t: str(Path(args.adapters_dir) / f"{t}-lora") for t in TASKS}
 
-    llm = LLM(model=args.base_model, enable_lora=True, max_loras=len(TASKS), max_lora_rank=16)
+    llm = LLM(
+        model=args.base_model,
+        enable_lora=True,
+        max_loras=len(TASKS),
+        max_lora_rank=16,
+        max_model_len=args.max_model_len,
+    )
     sampling = SamplingParams(temperature=0.0, max_tokens=256)
     tokenizer = AutoTokenizer.from_pretrained(args.base_model)
 
