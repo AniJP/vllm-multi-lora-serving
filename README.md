@@ -101,6 +101,44 @@ adapter quality) takes closer to 90 minutes per task, since forcing
 `loss_type="nll"` (see Troubleshooting) trades some training speed for
 avoiding a `trl` crash on this stack.
 
+## Results
+
+Actual output from `serve_demo.py --mode compare` (adapters trained with the
+notebook's fast defaults: 800 examples, 1.5 epochs), one base-model-vs-adapter
+pair per task:
+
+**`sql`**
+> Table schema: `employees (id INT, name TEXT, department TEXT, salary INT)`
+> Question: *What is the average salary per department?*
+
+| | Output |
+|---|---|
+| Base model | ` SELECT AVG(salary) AS average_salary, department FROM employees GROUP BY department; ` |
+| `sql-lora` | ` SELECT AVG(salary) FROM employees GROUP BY department ` |
+
+**`summarize`**
+> Conversation: *Amy asks about the 3pm meeting; Jake asks to push it to 3:30; Amy agrees to update the invite.*
+
+| | Output |
+|---|---|
+| Base model | "Amy and Jake confirm their 3:30pm meeting, with Amy agreeing to update the calendar invite." |
+| `summarize-lora` | "Jake and Amy are meeting at 3:30." |
+
+**`extract`** — the clearest case of the adapter changing *behavior*, not just
+style:
+> Text: *"Satya Nadella, CEO of Microsoft, met with officials in Berlin last week."*
+
+| | Output |
+|---|---|
+| Base model | ` ```json\n[{"text": "Satya Nadella", "type": "PERSON"}, ...]\n``` \n\nNote: There are no MISC entities in this text. ` — markdown-fenced, with a trailing note. **Not valid JSON on its own.** |
+| `extract-lora` | ` [{"text": "Satya Nadella", "type": "PERSON"}, {"text": "Microsoft", "type": "ORG"}, {"text": "Berlin", "type": "LOC"}] ` — clean, directly `json.loads()`-able. |
+
+That last one is the concrete payoff of task-specific LoRA adapters over a
+generic instruction-following model: the base model is *correct* but wraps
+its answer in prose and formatting that would break a naive downstream
+parser; the adapter learned the exact output contract from training data and
+just emits it.
+
 ## Notes
 
 - 4-bit quantization (`bitsandbytes`, NF4) is used during LoRA fine-tuning to
