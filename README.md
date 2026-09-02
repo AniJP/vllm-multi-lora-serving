@@ -143,3 +143,10 @@ Issues hit and fixed while running this on Kaggle, in case you hit them too:
   model weights. `serve_demo.py` now passes `--max-model-len 4096` (plenty for
   our short prompts + 256-token generations); pass a different value for
   longer contexts if you need them.
+- **`FileNotFoundError: adapters/sql-lora/adapter_config.json`** /
+  `LoRAAdapterNotFoundError` — usually means the notebook's working directory
+  drifted (e.g. `repo/repo/...` from re-running the clone/`%cd` cell after a
+  restart), so the relative `adapters/` path no longer points at where
+  training actually saved the adapters. The clone cell is now idempotent
+  (checks `os.getcwd()` before cloning/`cd`-ing again); if you still hit this,
+  run `import os; print(os.getcwd())` and `os.chdir("/kaggle/working/repo")`.
